@@ -5,9 +5,8 @@ import (
 	"path/filepath"
 	"volcengine-whitelist-manager/internal/models"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
-	_ "modernc.org/sqlite" // Use pure Go SQLite implementation
 )
 
 var DB *gorm.DB
