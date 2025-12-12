@@ -10,9 +10,9 @@ type Settings struct {
 	SecretKey       string `gorm:"size:100"`
 	Region          string `gorm:"size:50;default:'cn-beijing'"`
 	SecurityGroupID string `gorm:"size:50"`
-	SSHPort         int    `gorm:"default:22"`
+	SSHPort         string `gorm:"size:50;default:'22'"`
 	CheckInterval   int    `gorm:"default:900"` // Seconds
-	IPServices      string `gorm:"type:text;default:'https://api.ipify.org\nhttps://ifconfig.me/ip\nhttps://icanhazip.com\nhttps://ident.me'"`
+	IPServices      string `gorm:"type:text;default:'https://myip.ipip.net\nhttps://ddns.oray.com/checkip\nhttps://ip.3322.net\nhttps://v4.yinghualuo.cn/bejson'"`
 }
 
 type UpdateLog struct {

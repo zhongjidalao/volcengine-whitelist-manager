@@ -20,13 +20,13 @@ func main() {
 	c := cron.New()
 	settings := config.GetSettings()
 	
-	var jobID *cron.EntryID
+	var jobID cron.EntryID
 	if settings.CheckInterval > 0 {
 		id, err := c.AddFunc(fmt.Sprintf("@every %ds", settings.CheckInterval), service.CheckAndUpdate)
 		if err != nil {
 			log.Printf("Failed to schedule job: %v", err)
 		} else {
-			jobID = &id
+			jobID = id
 		}
 	}
 	c.Start()

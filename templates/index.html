@@ -8,9 +8,9 @@
             </div>
             <div class="card-body">
                 <p><strong>监控状态:</strong> <span class="badge bg-success">运行中</span></p>
-                <p><strong>下次运行:</strong> {{ .NextRun }}</p>
-                <p><strong>检测间隔:</strong> {{ .Settings.CheckInterval }} 秒</p>
-                <p><strong>当前端口:</strong> {{ .Settings.SSHPort }}</p>
+                <p><strong>下次运行:</strong> <span id="nextRun">{{ .NextRun }}</span></p>
+                <p><strong>检测间隔:</strong> <span id="checkInterval">{{ .Settings.CheckInterval }}</span> 秒</p>
+                <p><strong>当前端口:</strong> <span id="sshPort">{{ .Settings.SSHPort }}</span></p>
                 <hr>
                 <form action="/run_now" method="post">
                     <button type="submit" class="btn btn-primary w-100">
@@ -28,7 +28,7 @@
                 <a href="/logs" class="btn btn-sm btn-outline-secondary">查看全部</a>
             </div>
             <div class="card-body p-0">
-                <div class="list-group list-group-flush">
+                <div class="list-group list-group-flush" id="recentLogsContainer">
                     {{ if .Logs }}
                         {{ range .Logs }}
                         <div class="list-group-item">
@@ -47,5 +47,67 @@
         </div>
     </div>
 </div>
+
+<script>
+    const recentLogsContainer = document.getElementById('recentLogsContainer');
+    const nextRunEl = document.getElementById('nextRun');
+    const checkIntervalEl = document.getElementById('checkInterval');
+    const sshPortEl = document.getElementById('sshPort');
+
+    function updateDashboard() {
+        // Fetch Status
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                nextRunEl.textContent = data.NextRun;
+                checkIntervalEl.textContent = data.CheckInterval;
+                sshPortEl.textContent = data.SSHPort;
+            })
+            .catch(err => console.error('Error fetching status:', err));
+
+        // Fetch Logs
+        fetch('/api/logs')
+            .then(response => response.json())
+            .then(data => {
+                // Limit to 10 for dashboard
+                const logs = data.slice(0, 10);
+                
+                if (logs.length === 0) {
+                     recentLogsContainer.innerHTML = '<div class="p-3 text-center text-muted">暂无日志</div>';
+                     return;
+                }
+
+                recentLogsContainer.innerHTML = '';
+                logs.forEach(log => {
+                    let badgeClass = 'bg-info';
+                    if (log.Level === 'ERROR') badgeClass = 'bg-danger';
+                    else if (log.Level === 'WARNING') badgeClass = 'bg-warning';
+
+                    const date = new Date(log.Timestamp);
+                    const formattedTime = date.getFullYear() + '-' +
+                        String(date.getMonth() + 1).padStart(2, '0') + '-' +
+                        String(date.getDate()).padStart(2, '0') + ' ' +
+                        String(date.getHours()).padStart(2, '0') + ':' +
+                        String(date.getMinutes()).padStart(2, '0') + ':' +
+                        String(date.getSeconds()).padStart(2, '0');
+
+                    const item = `
+                        <div class="list-group-item">
+                            <div class="d-flex w-100 justify-content-between">
+                                <small class="text-muted">${formattedTime}</small>
+                                <span class="badge ${badgeClass}">${log.Level}</span>
+                            </div>
+                            <p class="mb-1 text-break">${log.Message}</p>
+                        </div>
+                    `;
+                    recentLogsContainer.insertAdjacentHTML('beforeend', item);
+                });
+            })
+            .catch(err => console.error('Error fetching logs:', err));
+    }
+
+    // Auto refresh every 3 seconds
+    setInterval(updateDashboard, 3000);
+</script>
 
 {{ template "footer.html" . }}

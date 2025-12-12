@@ -32,12 +32,20 @@
 
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="ssh_port" class="form-label">SSH 端口</label>
-                            <input type="number" class="form-control" id="ssh_port" name="ssh_port" value="{{ .Settings.SSHPort }}" required>
+                            <label for="ssh_port" class="form-label">SSH 端口 (多个用逗号分隔)</label>
+                            <input type="text" class="form-control" id="ssh_port" name="ssh_port" value="{{ .Settings.SSHPort }}" placeholder="22,8080" required>
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label for="check_interval" class="form-label">检查间隔 (秒)</label>
-                            <input type="number" class="form-control" id="check_interval" name="check_interval" value="{{ .Settings.CheckInterval }}" required>
+                            <label for="check_interval_value" class="form-label">检查间隔</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="check_interval_value" name="check_interval_value" value="{{ .CheckIntervalValue }}" required min="1">
+                                <select class="form-select text-center" id="check_interval_unit" name="check_interval_unit" style="flex-grow: 0 !important; width: fit-content;">
+                                    <option value="seconds" {{ if eq .CheckIntervalUnit "seconds" }}selected{{ end }}>秒</option>
+                                    <option value="minutes" {{ if eq .CheckIntervalUnit "minutes" }}selected{{ end }}>分钟</option>
+                                    <option value="hours" {{ if eq .CheckIntervalUnit "hours" }}selected{{ end }}>小时</option>
+                                </select>
+                            </div>
+                            <input type="hidden" id="check_interval_seconds" name="check_interval" value="{{ .Settings.CheckInterval }}">
                         </div>
                     </div>
 
@@ -56,5 +64,34 @@
         </div>
     </div>
 </div>
+
+<script>
+    const intervalValueInput = document.getElementById('check_interval_value');
+    const intervalUnitSelect = document.getElementById('check_interval_unit');
+    const intervalSecondsInput = document.getElementById('check_interval_seconds');
+
+    function updateIntervalSeconds() {
+        let value = parseInt(intervalValueInput.value);
+        if (isNaN(value) || value < 1) {
+            value = 1; // Default to 1 if invalid
+        }
+
+        const unit = intervalUnitSelect.value;
+        let seconds = value;
+
+        if (unit === 'minutes') {
+            seconds = value * 60;
+        } else if (unit === 'hours') {
+            seconds = value * 3600;
+        }
+        intervalSecondsInput.value = seconds;
+    }
+
+    intervalValueInput.addEventListener('input', updateIntervalSeconds);
+    intervalUnitSelect.addEventListener('change', updateIntervalSeconds);
+
+    // Initial update on page load
+    updateIntervalSeconds();
+</script>
 
 {{ template "footer.html" . }}

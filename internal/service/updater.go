@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,15 +21,15 @@ import (
 func CheckAndUpdate() {
 	settings := config.GetSettings()
 	if settings.AccessKey == "" || settings.SecretKey == "" || settings.SecurityGroupID == "" {
-		config.Log("WARNING", "Task skipped: Incomplete configuration (AK/SK/SG_ID missing)")
+		config.Log("WARNING", "任务跳过: 配置不完整 (AK/SK/SG_ID 缺失)")
 		return
 	}
 
-	config.Log("INFO", "Starting IP check...")
+	config.Log("INFO", "开始IP检查...")
 
 	currentIP := getCurrentIP(settings.IPServices)
 	if currentIP == "" {
-		config.Log("ERROR", "Failed to get current public IP, skipping check")
+		config.Log("ERROR", "无法获取当前公网IP，跳过检查")
 		return
 	}
 
@@ -47,7 +48,7 @@ func getCurrentIP(servicesStr string) string {
 
 		resp, err := client.Get(url)
 		if err != nil {
-			config.Log("WARNING", fmt.Sprintf("Failed to get IP from %s: %v", url, err))
+			config.Log("WARNING", fmt.Sprintf("从 %s 获取IP失败: %v", url, err))
 			continue
 		}
 		
@@ -57,7 +58,7 @@ func getCurrentIP(servicesStr string) string {
 			resp.Body.Close()
 			ip := strings.TrimSpace(string(body))
 			if ip != "" {
-				config.Log("INFO", fmt.Sprintf("Current Public IP: %s (Source: %s)", ip, url))
+				config.Log("INFO", fmt.Sprintf("当前公网IP: %s (来源: %s)", ip, url))
 				return ip
 			}
 		} else {
@@ -74,11 +75,28 @@ func updateSecurityGroup(settings *models.Settings, currentIP string) {
 
 	sess, err := session.NewSession(conf)
 	if err != nil {
-		config.Log("ERROR", fmt.Sprintf("Failed to create session: %v", err))
+		config.Log("ERROR", fmt.Sprintf("创建会话失败: %v", err))
 		return
 	}
 
 	vpcClient := vpc.New(sess)
+
+	// Parse Ports
+	portsStr := strings.Split(settings.SSHPort, ",")
+	var ports []int
+	for _, p := range portsStr {
+		p = strings.TrimSpace(p)
+		// Check for range like "8000-8005" - simpler to just support single ports for now, 
+		// or treat ranges? User asked for comma separated.
+		if val, err := strconv.Atoi(p); err == nil && val > 0 && val <= 65535 {
+			ports = append(ports, val)
+		}
+	}
+
+	if len(ports) == 0 {
+		config.Log("WARNING", "未配置有效的SSH端口 (请使用逗号分隔，例如: 22,8080)")
+		return
+	}
 
 	// Get current rules
 	input := &vpc.DescribeSecurityGroupAttributesInput{
@@ -87,69 +105,73 @@ func updateSecurityGroup(settings *models.Settings, currentIP string) {
 
 	output, err := vpcClient.DescribeSecurityGroupAttributes(input)
 	if err != nil {
-		config.Log("ERROR", fmt.Sprintf("Failed to describe security group: %v", err))
+		config.Log("ERROR", fmt.Sprintf("获取安全组属性失败: %v", err))
 		return
 	}
 
-	var existingRule *vpc.PermissionForDescribeSecurityGroupAttributesOutput
+	for _, targetPort := range ports {
+		var existingRule *vpc.PermissionForDescribeSecurityGroupAttributesOutput
+		description := fmt.Sprintf("SSH访问(端口%d) - Go脚本自动更新", targetPort)
 
-	// Find existing SSH rule
-	for _, perm := range output.Permissions {
-		if volcengine.StringValue(perm.Direction) == "ingress" &&
-			(strings.EqualFold(volcengine.StringValue(perm.Protocol), "tcp") || strings.EqualFold(volcengine.StringValue(perm.Protocol), "all")) &&
-			int(volcengine.Int64Value(perm.PortStart)) <= settings.SSHPort &&
-			int(volcengine.Int64Value(perm.PortEnd)) >= settings.SSHPort {
-			existingRule = perm
-			break
+		// Find existing SSH rule for THIS port
+		for _, perm := range output.Permissions {
+			if volcengine.StringValue(perm.Direction) == "ingress" &&
+				(strings.EqualFold(volcengine.StringValue(perm.Protocol), "tcp") || strings.EqualFold(volcengine.StringValue(perm.Protocol), "all")) &&
+				int(volcengine.Int64Value(perm.PortStart)) == targetPort &&
+				int(volcengine.Int64Value(perm.PortEnd)) == targetPort {
+				existingRule = perm
+				if desc := volcengine.StringValue(perm.Description); desc != "" {
+					description = desc
+				}
+				break
+			}
 		}
-	}
 
-	if existingRule != nil {
-		currentCidr := volcengine.StringValue(existingRule.CidrIp)
-		existingIP := strings.Split(currentCidr, "/")[0]
+		if existingRule != nil {
+			currentCidr := volcengine.StringValue(existingRule.CidrIp)
+			existingIP := strings.Split(currentCidr, "/")[0]
+			
+			if existingIP == currentIP {
+				config.Log("INFO", fmt.Sprintf("端口 %d: IP未变 (%s)，无需更新", targetPort, existingIP))
+				continue
+			}
+
+			// Revoke old rule
+			config.Log("INFO", fmt.Sprintf("端口 %d: 撤销旧规则 %s", targetPort, currentCidr))
+			_, err := vpcClient.RevokeSecurityGroupIngress(&vpc.RevokeSecurityGroupIngressInput{
+				SecurityGroupId: volcengine.String(settings.SecurityGroupID),
+				Protocol:        existingRule.Protocol,
+				PortStart:       volcengine.Int64(int64(targetPort)),
+				PortEnd:         volcengine.Int64(int64(targetPort)),
+				CidrIp:          existingRule.CidrIp,
+				Policy:          existingRule.Policy,
+			})
+			if err != nil {
+				config.Log("WARNING", fmt.Sprintf("端口 %d: 撤销失败: %v", targetPort, err))
+			}
+		} else {
+			config.Log("INFO", fmt.Sprintf("端口 %d: 未找到现有规则，将添加新规则", targetPort))
+		}
+
+		// Authorize new rule
+		newCidr := fmt.Sprintf("%s/32", currentIP)
+		config.Log("INFO", fmt.Sprintf("端口 %d: 添加新规则 %s", targetPort, newCidr))
 		
-		config.Log("INFO", fmt.Sprintf("Found existing SSH rule IP: %s", existingIP))
-
-		if existingIP == currentIP {
-			config.Log("INFO", "✓ IP address unchanged, no update needed")
-			return
-		}
-
-		// Revoke old rule
-		config.Log("INFO", fmt.Sprintf("Revoking old SSH rule: %s", currentCidr))
-		_, err := vpcClient.RevokeSecurityGroupIngress(&vpc.RevokeSecurityGroupIngressInput{
+		_, err = vpcClient.AuthorizeSecurityGroupIngress(&vpc.AuthorizeSecurityGroupIngressInput{
 			SecurityGroupId: volcengine.String(settings.SecurityGroupID),
-			Protocol:        existingRule.Protocol,
-			PortStart:       volcengine.Int64(int64(settings.SSHPort)),
-			PortEnd:         volcengine.Int64(int64(settings.SSHPort)),
-			CidrIp:          existingRule.CidrIp,
-			Policy:          existingRule.Policy,
+			Protocol:        volcengine.String("TCP"),
+			PortStart:       volcengine.Int64(int64(targetPort)),
+			PortEnd:         volcengine.Int64(int64(targetPort)),
+			CidrIp:          volcengine.String(newCidr),
+			Policy:          volcengine.String("accept"),
+			Priority:        volcengine.Int64(1),
+			Description:     volcengine.String(description),
 		})
+
 		if err != nil {
-			config.Log("WARNING", fmt.Sprintf("Failed to revoke old rule (continuing): %v", err))
+			config.Log("ERROR", fmt.Sprintf("端口 %d: 授权失败: %v", targetPort, err))
+		} else {
+			config.Log("INFO", fmt.Sprintf("✓ 端口 %d: 已更新允许 %s", targetPort, newCidr))
 		}
-	} else {
-		config.Log("INFO", "No existing SSH rule found, adding new one")
-	}
-
-	// Authorize new rule
-	newCidr := fmt.Sprintf("%s/32", currentIP)
-	config.Log("INFO", fmt.Sprintf("Adding new SSH rule: %s", newCidr))
-	
-	_, err = vpcClient.AuthorizeSecurityGroupIngress(&vpc.AuthorizeSecurityGroupIngressInput{
-		SecurityGroupId: volcengine.String(settings.SecurityGroupID),
-		Protocol:        volcengine.String("TCP"),
-		PortStart:       volcengine.Int64(int64(settings.SSHPort)),
-		PortEnd:         volcengine.Int64(int64(settings.SSHPort)),
-		CidrIp:          volcengine.String(newCidr),
-		Policy:          volcengine.String("accept"),
-		Priority:        volcengine.Int64(1),
-		Description:     volcengine.String("SSH access - Auto updated by Go script"),
-	})
-
-	if err != nil {
-		config.Log("ERROR", fmt.Sprintf("Failed to authorize new rule: %v", err))
-	} else {
-		config.Log("INFO", fmt.Sprintf("✓ Security group updated: Allow %s access to port %d", newCidr, settings.SSHPort))
 	}
 }

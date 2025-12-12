@@ -22,7 +22,7 @@ func InitDB() {
 	dbPath := filepath.Join("instance", "config.db")
 	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
-		panic("failed to connect database: " + err.Error())
+		panic("连接数据库失败: " + err.Error())
 	}
 
 	// Migrate the schema

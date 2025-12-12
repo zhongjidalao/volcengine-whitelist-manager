@@ -1,8 +1,19 @@
 {{ template "header.html" . }}
 
 <div class="card">
-    <div class="card-header bg-white">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
         <h4 class="mb-0">系统日志</h4>
+        <div>
+            <form action="/logs/clear" method="post" class="d-inline" onsubmit="return confirm('确定要清空所有日志吗？');">
+                <button type="submit" class="btn btn-sm btn-outline-danger me-2">
+                    <i class="bi bi-trash"></i> 清空日志
+                </button>
+            </form>
+            <div class="form-check form-switch d-inline-block">
+                <input class="form-check-input" type="checkbox" id="autoRefresh" checked>
+                <label class="form-check-label" for="autoRefresh">自动刷新</label>
+            </div>
+        </div>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -14,7 +25,7 @@
                         <th>消息</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="logsTableBody">
                     {{ range .Logs }}
                     <tr>
                         <td>{{ .Timestamp.Format "2006-01-02 15:04:05" }}</td>
@@ -56,5 +67,60 @@
         </nav>
     </div>
 </div>
+
+<script>
+    const autoRefreshCheckbox = document.getElementById('autoRefresh');
+    const logsTableBody = document.getElementById('logsTableBody');
+    let intervalId;
+
+    function fetchLogs() {
+        if (!autoRefreshCheckbox.checked) return;
+
+        fetch('/api/logs')
+            .then(response => response.json())
+            .then(data => {
+                logsTableBody.innerHTML = '';
+                data.forEach(log => {
+                    let badgeClass = 'bg-info';
+                    if (log.Level === 'ERROR') badgeClass = 'bg-danger';
+                    else if (log.Level === 'WARNING') badgeClass = 'bg-warning';
+
+                    // Parse timestamp
+                    const date = new Date(log.Timestamp);
+                    const formattedTime = date.getFullYear() + '-' +
+                        String(date.getMonth() + 1).padStart(2, '0') + '-' +
+                        String(date.getDate()).padStart(2, '0') + ' ' +
+                        String(date.getHours()).padStart(2, '0') + ':' +
+                        String(date.getMinutes()).padStart(2, '0') + ':' +
+                        String(date.getSeconds()).padStart(2, '0');
+
+                    const row = `
+                        <tr>
+                            <td>${formattedTime}</td>
+                            <td><span class="badge ${badgeClass}">${log.Level}</span></td>
+                            <td class="text-break">${log.Message}</td>
+                        </tr>
+                    `;
+                    logsTableBody.insertAdjacentHTML('beforeend', row);
+                });
+            })
+            .catch(err => console.error('Error fetching logs:', err));
+    }
+
+    function toggleAutoRefresh() {
+        if (autoRefreshCheckbox.checked) {
+            // First fetch immediately
+            fetchLogs();
+            intervalId = setInterval(fetchLogs, 3000);
+        } else {
+            clearInterval(intervalId);
+        }
+    }
+
+    autoRefreshCheckbox.addEventListener('change', toggleAutoRefresh);
+    
+    // Initialize
+    toggleAutoRefresh();
+</script>
 
 {{ template "footer.html" . }}

@@ -15,7 +15,7 @@ import (
 
 type Handler struct {
 	Cron  *cron.Cron
-	JobID *cron.EntryID
+	JobID cron.EntryID
 }
 
 func (h *Handler) RegisterRoutes(r *gin.Engine) {
@@ -23,7 +23,42 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	r.GET("/settings", h.SettingsPage)
 	r.POST("/settings", h.SaveSettings)
 	r.POST("/run_now", h.RunNow)
+	r.POST("/logs/clear", h.ClearLogs)
 	r.GET("/logs", h.LogsPage)
+	r.GET("/api/logs", h.GetLogsJSON)
+	r.GET("/api/status", h.GetStatusJSON)
+}
+
+func (h *Handler) ClearLogs(c *gin.Context) {
+	config.DB.Exec("DELETE FROM update_logs")
+	c.Redirect(http.StatusFound, "/logs?flash=日志已清空")
+}
+
+func (h *Handler) GetStatusJSON(c *gin.Context) {
+	settings := config.GetSettings()
+	var nextRun string
+	if h.JobID != 0 {
+		entry := h.Cron.Entry(h.JobID)
+		if !entry.Next.IsZero() {
+			nextRun = entry.Next.Format("2006-01-02 15:04:05")
+		} else {
+			nextRun = "运行中..."
+		}
+	} else {
+		nextRun = "未调度"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"NextRun":       nextRun,
+		"CheckInterval": settings.CheckInterval,
+		"SSHPort":       settings.SSHPort,
+	})
+}
+
+func (h *Handler) GetLogsJSON(c *gin.Context) {
+	var logs []models.UpdateLog
+	config.DB.Order("timestamp desc").Limit(50).Find(&logs)
+	c.JSON(http.StatusOK, logs)
 }
 
 func (h *Handler) Index(c *gin.Context) {
@@ -32,8 +67,8 @@ func (h *Handler) Index(c *gin.Context) {
 	config.DB.Order("timestamp desc").Limit(10).Find(&logs)
 
 	var nextRun string
-	if h.JobID != nil {
-		entry := h.Cron.Entry(*h.JobID)
+	if h.JobID != 0 {
+		entry := h.Cron.Entry(h.JobID)
 		if !entry.Next.IsZero() {
 			nextRun = entry.Next.Format("2006-01-02 15:04:05")
 		} else {
@@ -55,8 +90,23 @@ func (h *Handler) Index(c *gin.Context) {
 
 func (h *Handler) SettingsPage(c *gin.Context) {
 	settings := config.GetSettings()
+    
+    // Convert CheckInterval (seconds) to human-readable form
+    intervalValue := settings.CheckInterval
+    intervalUnit := "seconds" // Default unit
+
+    if intervalValue >= 3600 && intervalValue%3600 == 0 { // Check for full hours
+        intervalValue /= 3600
+        intervalUnit = "hours"
+    } else if intervalValue >= 60 && intervalValue%60 == 0 { // Check for full minutes
+        intervalValue /= 60
+        intervalUnit = "minutes"
+    }
+
 	c.HTML(http.StatusOK, "settings.html", gin.H{
 		"Settings": settings,
+        "CheckIntervalValue": intervalValue,
+        "CheckIntervalUnit": intervalUnit,
 	})
 }
 
@@ -66,7 +116,7 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 		SecretKey       string `form:"secret_key"`
 		Region          string `form:"region"`
 		SecurityGroupID string `form:"security_group_id"`
-		SSHPort         int    `form:"ssh_port"`
+		SSHPort         string `form:"ssh_port"`
 		CheckInterval   int    `form:"check_interval"`
 		IPServices      string `form:"ip_services"`
 	}
@@ -88,19 +138,19 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 	config.DB.Save(settings)
 
 	// Update Job
-	if h.JobID != nil {
-		h.Cron.Remove(*h.JobID)
+	if h.JobID != 0 {
+		h.Cron.Remove(h.JobID)
 	}
 
 	id, _ := h.Cron.AddFunc(fmt.Sprintf("@every %ds", settings.CheckInterval), service.CheckAndUpdate)
-	h.JobID = &id
+	h.JobID = id
 
-	c.Redirect(http.StatusFound, "/?flash=Settings+Saved")
+	c.Redirect(http.StatusFound, "/?flash=设置已保存")
 }
 
 func (h *Handler) RunNow(c *gin.Context) {
 	go service.CheckAndUpdate()
-	c.Redirect(http.StatusFound, "/?flash=Manual+Update+Triggered")
+	c.Redirect(http.StatusFound, "/?flash=已触发立即更新任务")
 }
 
 func (h *Handler) LogsPage(c *gin.Context) {
