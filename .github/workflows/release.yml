@@ -65,17 +65,11 @@ jobs:
         run: |
           # 创建 amd64 压缩包
           tar -czf volcengine-whitelist-manager-linux-amd64.tar.gz \
-            volcengine-whitelist-manager-linux-amd64 \
-            templates/ \
-            README.md \
-            LICENSE
+            volcengine-whitelist-manager-linux-amd64
 
           # 创建 arm64 压缩包
           tar -czf volcengine-whitelist-manager-linux-arm64.tar.gz \
-            volcengine-whitelist-manager-linux-arm64 \
-            templates/ \
-            README.md \
-            LICENSE
+            volcengine-whitelist-manager-linux-arm64
 
           # 生成 SHA256 校验和
           sha256sum volcengine-whitelist-manager-linux-amd64.tar.gz > checksums.txt
