@@ -7,7 +7,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.20+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-[English](#) | [简体中文](#)
+[English](README_EN.md) | [简体中文](README.md)
 
 </div>
 
