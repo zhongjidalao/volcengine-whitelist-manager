@@ -110,7 +110,7 @@ go run cmd/server/main.go
 ### 初始配置
 
 1. **启动服务**
-   程序启动后,访问 `http://localhost:5000`
+   程序启动后,访问 `http://localhost:9877`
 
 2. **进入设置页面**
    点击导航栏的 "Settings" 按钮
@@ -251,7 +251,7 @@ A: 检查以下几点:
 A: 自动创建在 `instance/config.db`,与可执行文件同级目录。
 
 **Q: 如何修改监听端口?**
-A: 编辑 `cmd/server/main.go` 第 48 行,修改 `:5000` 为其他端口。
+A: 编辑 `cmd/server/main.go` 第 47 行,修改 `:9877` 为其他端口。
 
 ---
 

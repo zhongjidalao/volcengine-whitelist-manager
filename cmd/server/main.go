@@ -44,8 +44,8 @@ func main() {
 	h.RegisterRoutes(r)
 
 	// Run
-	log.Println("Starting server on :5000...")
-	if err := r.Run(":5000"); err != nil {
+	log.Println("Starting server on :9877...")
+	if err := r.Run(":9877"); err != nil {
 		log.Fatal(err)
 	}
 }
