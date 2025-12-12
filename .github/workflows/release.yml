@@ -38,7 +38,7 @@ jobs:
         env:
           GOOS: linux
           GOARCH: amd64
-          CGO_ENABLED: 1
+          CGO_ENABLED: 0
         run: |
           go build -o volcengine-whitelist-manager-linux-amd64 \
             -ldflags "-s -w -X main.Version=${{ steps.version.outputs.version }}" \
@@ -49,13 +49,8 @@ jobs:
         env:
           GOOS: linux
           GOARCH: arm64
-          CGO_ENABLED: 1
-          CC: aarch64-linux-gnu-gcc
+          CGO_ENABLED: 0
         run: |
-          # 安装交叉编译工具
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
           go build -o volcengine-whitelist-manager-linux-arm64 \
             -ldflags "-s -w -X main.Version=${{ steps.version.outputs.version }}" \
             cmd/server/main.go
