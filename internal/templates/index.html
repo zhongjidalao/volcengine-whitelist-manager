@@ -15,6 +15,7 @@
                 <p id="awsRow" {{ if not .AWSEnabled }}style="display:none;"{{ end }}><strong>AWS Lightsail 端口:</strong> <span id="awsPorts">{{ if .Settings.AWSPorts }}{{ .Settings.AWSPorts }}{{ else }}{{ .Settings.SSHPort }}{{ end }}</span></p>
                 <p id="awsEC2Row" {{ if not .AWSEC2Enabled }}style="display:none;"{{ end }}><strong>AWS EC2 端口:</strong> <span id="awsEC2Ports">{{ if .Settings.AWSEC2Ports }}{{ .Settings.AWSEC2Ports }}{{ else }}{{ .Settings.SSHPort }}{{ end }}</span></p>
                 <p id="tencentRow" {{ if not .TencentEnabled }}style="display:none;"{{ end }}><strong>Tencent Cloud 端口:</strong> <span id="tencentPorts">{{ if .Settings.TencentPorts }}{{ .Settings.TencentPorts }}{{ else }}{{ .Settings.SSHPort }}{{ end }}</span></p>
+                <p id="aliyunRow" {{ if not .AliyunEnabled }}style="display:none;"{{ end }}><strong>Alibaba Cloud 端口:</strong> <span id="aliyunPorts">{{ if .Settings.AliyunPorts }}{{ .Settings.AliyunPorts }}{{ else }}{{ .Settings.SSHPort }}{{ end }}</span></p>
                 <hr>
                 <form action="/run_now" method="post">
                     <button type="submit" class="btn btn-primary w-100">
@@ -61,10 +62,12 @@
     const awsRowEl = document.getElementById('awsRow');
     const awsEC2RowEl = document.getElementById('awsEC2Row');
     const tencentRowEl = document.getElementById('tencentRow');
+    const aliyunRowEl = document.getElementById('aliyunRow');
     const volcenginePortsEl = document.getElementById('volcenginePorts');
     const awsPortsEl = document.getElementById('awsPorts');
     const awsEC2PortsEl = document.getElementById('awsEC2Ports');
     const tencentPortsEl = document.getElementById('tencentPorts');
+    const aliyunPortsEl = document.getElementById('aliyunPorts');
 
     function hasProvider(providersCSV, target) {
         return providersCSV
@@ -85,17 +88,20 @@
                 awsPortsEl.textContent = data.AWSPorts || data.SSHPort || '';
                 awsEC2PortsEl.textContent = data.AWSEC2Ports || data.SSHPort || '';
                 tencentPortsEl.textContent = data.TencentPorts || data.SSHPort || '';
+                aliyunPortsEl.textContent = data.AliyunPorts || data.SSHPort || '';
 
                 const providers = (data.Providers || data.Provider || 'volcengine').toLowerCase();
                 const volcEnabled = typeof data.VolcEnabled === 'boolean' ? data.VolcEnabled : hasProvider(providers, 'volcengine');
                 const awsEnabled = typeof data.AWSEnabled === 'boolean' ? data.AWSEnabled : hasProvider(providers, 'aws');
                 const awsEC2Enabled = typeof data.AWSEC2Enabled === 'boolean' ? data.AWSEC2Enabled : hasProvider(providers, 'aws-ec2');
                 const tencentEnabled = typeof data.TencentEnabled === 'boolean' ? data.TencentEnabled : hasProvider(providers, 'tencent');
+                const aliyunEnabled = typeof data.AliyunEnabled === 'boolean' ? data.AliyunEnabled : hasProvider(providers, 'aliyun');
 
                 volcengineRowEl.style.display = volcEnabled ? '' : 'none';
                 awsRowEl.style.display = awsEnabled ? '' : 'none';
                 awsEC2RowEl.style.display = awsEC2Enabled ? '' : 'none';
                 tencentRowEl.style.display = tencentEnabled ? '' : 'none';
+                aliyunRowEl.style.display = aliyunEnabled ? '' : 'none';
             })
             .catch(err => console.error('Error fetching status:', err));
 

@@ -14,6 +14,8 @@ import (
 	"volcengine-whitelist-manager/internal/config"
 	"volcengine-whitelist-manager/internal/models"
 
+	aliyunOpenAPI "github.com/alibabacloud-go/darabonba-openapi/v2/utils"
+	aliyunECS "github.com/alibabacloud-go/ecs-20140526/v7/client"
 	awsSDK "github.com/aws/aws-sdk-go/aws"
 	awsCredentials "github.com/aws/aws-sdk-go/aws/credentials"
 	awsSession "github.com/aws/aws-sdk-go/aws/session"
@@ -33,6 +35,7 @@ const (
 	providerAWS        = "aws"
 	providerAWSEC2     = "aws-ec2"
 	providerTencent    = "tencent"
+	providerAliyun     = "aliyun"
 )
 
 // CheckAndUpdate is the main entry point for the scheduled task
@@ -76,6 +79,8 @@ func CheckAndUpdate() {
 			updateAWSEC2SecurityGroup(settings, currentIP, ports)
 		case providerTencent:
 			updateTencentSecurityGroup(settings, currentIP, ports)
+		case providerAliyun:
+			updateAliyunSecurityGroup(settings, currentIP, ports)
 		default:
 			updateVolcengineSecurityGroup(settings, currentIP, ports)
 		}
@@ -91,8 +96,8 @@ func normalizeProviders(providersStr, legacyProvider string) []string {
 		raw = providerVolcengine
 	}
 
-	providers := make([]string, 0, 4)
-	seen := make(map[string]struct{}, 4)
+	providers := make([]string, 0, 5)
+	seen := make(map[string]struct{}, 5)
 	for _, item := range strings.Split(raw, ",") {
 		provider, ok := normalizeProvider(item)
 		if !ok {
@@ -118,6 +123,8 @@ func normalizeProvider(provider string) (string, bool) {
 		return providerAWSEC2, true
 	case providerTencent:
 		return providerTencent, true
+	case providerAliyun:
+		return providerAliyun, true
 	default:
 		return "", false
 	}
@@ -164,6 +171,19 @@ func validateSettings(settings *models.Settings, provider string) error {
 		}
 		if strings.TrimSpace(settings.TencentSecurityGroupID) == "" {
 			missing = append(missing, "Tencent_SG_ID")
+		}
+	case providerAliyun:
+		if strings.TrimSpace(settings.AliyunAccessKey) == "" {
+			missing = append(missing, "Aliyun_AK")
+		}
+		if strings.TrimSpace(settings.AliyunSecretKey) == "" {
+			missing = append(missing, "Aliyun_SK")
+		}
+		if strings.TrimSpace(settings.AliyunRegion) == "" {
+			missing = append(missing, "Aliyun_Region")
+		}
+		if strings.TrimSpace(settings.AliyunSecurityGroupID) == "" {
+			missing = append(missing, "Aliyun_SG_ID")
 		}
 	default:
 		if strings.TrimSpace(settings.AccessKey) == "" {
@@ -282,6 +302,10 @@ func getPortsByProvider(settings *models.Settings, provider string) string {
 		}
 	case providerTencent:
 		if ports := strings.TrimSpace(settings.TencentPorts); ports != "" {
+			return ports
+		}
+	case providerAliyun:
+		if ports := strings.TrimSpace(settings.AliyunPorts); ports != "" {
 			return ports
 		}
 	default:
@@ -628,6 +652,320 @@ func updateTencentSecurityGroup(settings *models.Settings, currentIP string, por
 			config.Log("INFO", fmt.Sprintf("✓ provider=tencent 端口 %d: 已更新允许 %s", targetPort, newCidr))
 		}
 	}
+}
+
+func updateAliyunSecurityGroup(settings *models.Settings, currentIP string, ports []int) {
+	region := strings.TrimSpace(settings.AliyunRegion)
+	securityGroupID := strings.TrimSpace(settings.AliyunSecurityGroupID)
+
+	openAPIConfig := &aliyunOpenAPI.Config{}
+	openAPIConfig.SetAccessKeyId(strings.TrimSpace(settings.AliyunAccessKey))
+	openAPIConfig.SetAccessKeySecret(strings.TrimSpace(settings.AliyunSecretKey))
+	openAPIConfig.SetRegionId(region)
+
+	client, err := aliyunECS.NewClient(openAPIConfig)
+	if err != nil {
+		config.Log("ERROR", fmt.Sprintf("provider=aliyun: 创建阿里云会话失败: %v", err))
+		return
+	}
+
+	newCidr := fmt.Sprintf("%s/32", currentIP)
+
+	for _, targetPort := range ports {
+		ingressRules, err := describeAliyunIngressRules(client, region, securityGroupID)
+		if err != nil {
+			config.Log("ERROR", fmt.Sprintf("provider=aliyun: 获取安全组规则失败: %v", err))
+			return
+		}
+
+		matchedRules := findManagedAliyunIngressRules(ingressRules, targetPort)
+		if isAliyunPortSynced(matchedRules, targetPort, newCidr) {
+			config.Log("INFO", fmt.Sprintf("provider=aliyun 端口 %d: IP未变 (%s)，无需更新", targetPort, currentIP))
+			continue
+		}
+
+		if len(matchedRules) > 0 {
+			revokeAliyunIngressRules(client, region, securityGroupID, matchedRules, targetPort)
+		} else {
+			config.Log("INFO", fmt.Sprintf("provider=aliyun 端口 %d: 未找到现有规则，将添加新规则", targetPort))
+		}
+
+		config.Log("INFO", fmt.Sprintf("provider=aliyun 端口 %d: 添加新规则 %s", targetPort, newCidr))
+		authorizeReq := &aliyunECS.AuthorizeSecurityGroupRequest{}
+		authorizeReq.SetRegionId(region)
+		authorizeReq.SetSecurityGroupId(securityGroupID)
+		authorizeReq.SetPermissions([]*aliyunECS.AuthorizeSecurityGroupRequestPermissions{
+			new(aliyunECS.AuthorizeSecurityGroupRequestPermissions).
+				SetSourceCidrIp(newCidr).
+				SetIpProtocol("TCP").
+				SetPortRange(fmt.Sprintf("%d/%d", targetPort, targetPort)).
+				SetPolicy("Accept").
+				SetPriority("1").
+				SetNicType("intranet").
+				SetDescription(fmt.Sprintf("白名单访问(端口%d) - Go脚本自动更新", targetPort)),
+		})
+
+		if _, err = client.AuthorizeSecurityGroup(authorizeReq); err != nil {
+			config.Log("ERROR", fmt.Sprintf("provider=aliyun 端口 %d: 授权失败: %v", targetPort, err))
+		} else {
+			config.Log("INFO", fmt.Sprintf("✓ provider=aliyun 端口 %d: 已更新允许 %s", targetPort, newCidr))
+		}
+	}
+}
+
+func describeAliyunIngressRules(client *aliyunECS.Client, region, securityGroupID string) ([]*aliyunECS.DescribeSecurityGroupAttributeResponseBodyPermissionsPermission, error) {
+	allRules := make([]*aliyunECS.DescribeSecurityGroupAttributeResponseBodyPermissionsPermission, 0, 64)
+	nextToken := ""
+
+	for {
+		req := &aliyunECS.DescribeSecurityGroupAttributeRequest{}
+		req.SetRegionId(region)
+		req.SetSecurityGroupId(securityGroupID)
+		req.SetDirection("ingress")
+		req.SetNicType("intranet")
+		req.SetMaxResults(1000)
+		if nextToken != "" {
+			req.SetNextToken(nextToken)
+		}
+
+		resp, err := client.DescribeSecurityGroupAttribute(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp == nil || resp.Body == nil {
+			return allRules, nil
+		}
+		if resp.Body.Permissions != nil && len(resp.Body.Permissions.Permission) > 0 {
+			allRules = append(allRules, resp.Body.Permissions.Permission...)
+		}
+
+		nextToken = strings.TrimSpace(aliyunStringValue(resp.Body.NextToken))
+		if nextToken == "" {
+			break
+		}
+	}
+
+	return allRules, nil
+}
+
+func revokeAliyunIngressRules(client *aliyunECS.Client, region, securityGroupID string, rules []*aliyunECS.DescribeSecurityGroupAttributeResponseBodyPermissionsPermission, targetPort int) {
+	ruleIDs := collectAliyunRuleIDs(rules)
+	if len(ruleIDs) > 0 {
+		config.Log("INFO", fmt.Sprintf("provider=aliyun 端口 %d: 撤销旧规则 %d 条", targetPort, len(ruleIDs)))
+		revokeReq := &aliyunECS.RevokeSecurityGroupRequest{}
+		revokeReq.SetRegionId(region)
+		revokeReq.SetSecurityGroupId(securityGroupID)
+		revokeReq.SetSecurityGroupRuleId(ruleIDs)
+		if _, err := client.RevokeSecurityGroup(revokeReq); err != nil {
+			config.Log("WARNING", fmt.Sprintf("provider=aliyun 端口 %d: 按规则ID撤销失败: %v", targetPort, err))
+		}
+	}
+
+	legacyPermissions := buildAliyunRevokePermissionsWithoutID(rules)
+	if len(legacyPermissions) > 0 {
+		config.Log("INFO", fmt.Sprintf("provider=aliyun 端口 %d: 兼容模式撤销旧规则 %d 条", targetPort, len(legacyPermissions)))
+		revokeReq := &aliyunECS.RevokeSecurityGroupRequest{}
+		revokeReq.SetRegionId(region)
+		revokeReq.SetSecurityGroupId(securityGroupID)
+		revokeReq.SetPermissions(legacyPermissions)
+		if _, err := client.RevokeSecurityGroup(revokeReq); err != nil {
+			config.Log("WARNING", fmt.Sprintf("provider=aliyun 端口 %d: 兼容模式撤销失败: %v", targetPort, err))
+		}
+	}
+}
+
+func collectAliyunRuleIDs(rules []*aliyunECS.DescribeSecurityGroupAttributeResponseBodyPermissionsPermission) []*string {
+	ruleIDs := make([]*string, 0, len(rules))
+	seen := make(map[string]struct{}, len(rules))
+
+	for _, rule := range rules {
+		if rule == nil || rule.SecurityGroupRuleId == nil {
+			continue
+		}
+		ruleID := strings.TrimSpace(aliyunStringValue(rule.SecurityGroupRuleId))
+		if ruleID == "" {
+			continue
+		}
+		if _, ok := seen[ruleID]; ok {
+			continue
+		}
+		seen[ruleID] = struct{}{}
+		ruleIDs = append(ruleIDs, rule.SecurityGroupRuleId)
+	}
+
+	return ruleIDs
+}
+
+func buildAliyunRevokePermissionsWithoutID(rules []*aliyunECS.DescribeSecurityGroupAttributeResponseBodyPermissionsPermission) []*aliyunECS.RevokeSecurityGroupRequestPermissions {
+	permissions := make([]*aliyunECS.RevokeSecurityGroupRequestPermissions, 0, len(rules))
+	seen := make(map[string]struct{}, len(rules))
+
+	for _, rule := range rules {
+		if rule == nil || rule.SecurityGroupRuleId != nil {
+			continue
+		}
+
+		sourceCidr := strings.TrimSpace(aliyunStringValue(rule.SourceCidrIp))
+		ipProtocol := strings.ToUpper(strings.TrimSpace(aliyunStringValue(rule.IpProtocol)))
+		portRange := strings.TrimSpace(aliyunStringValue(rule.PortRange))
+		if sourceCidr == "" || ipProtocol == "" || portRange == "" {
+			continue
+		}
+
+		policy := strings.TrimSpace(aliyunStringValue(rule.Policy))
+		if policy == "" {
+			policy = "Accept"
+		}
+		priority := strings.TrimSpace(aliyunStringValue(rule.Priority))
+		if priority == "" {
+			priority = "1"
+		}
+		nicType := strings.TrimSpace(aliyunStringValue(rule.NicType))
+		if nicType == "" {
+			nicType = "intranet"
+		}
+		description := strings.TrimSpace(aliyunStringValue(rule.Description))
+
+		uniqueKey := strings.Join([]string{sourceCidr, ipProtocol, portRange, policy, priority, nicType, description}, "|")
+		if _, ok := seen[uniqueKey]; ok {
+			continue
+		}
+		seen[uniqueKey] = struct{}{}
+
+		permission := new(aliyunECS.RevokeSecurityGroupRequestPermissions).
+			SetSourceCidrIp(sourceCidr).
+			SetIpProtocol(ipProtocol).
+			SetPortRange(portRange).
+			SetPolicy(policy).
+			SetPriority(priority).
+			SetNicType(nicType)
+		if description != "" {
+			permission.SetDescription(description)
+		}
+
+		permissions = append(permissions, permission)
+	}
+
+	return permissions
+}
+
+func findManagedAliyunIngressRules(rules []*aliyunECS.DescribeSecurityGroupAttributeResponseBodyPermissionsPermission, targetPort int) []*aliyunECS.DescribeSecurityGroupAttributeResponseBodyPermissionsPermission {
+	matched := make([]*aliyunECS.DescribeSecurityGroupAttributeResponseBodyPermissionsPermission, 0, 4)
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(aliyunStringValue(rule.Policy)), "accept") {
+			continue
+		}
+		if strings.TrimSpace(aliyunStringValue(rule.SourceCidrIp)) == "" {
+			continue
+		}
+
+		protocol := strings.ToUpper(strings.TrimSpace(aliyunStringValue(rule.IpProtocol)))
+		if protocol != "TCP" && protocol != "ALL" {
+			continue
+		}
+		if !aliyunRulePortContainsTarget(rule.PortRange, targetPort, protocol == "ALL") {
+			continue
+		}
+
+		matched = append(matched, rule)
+	}
+
+	return matched
+}
+
+func isAliyunPortSynced(rules []*aliyunECS.DescribeSecurityGroupAttributeResponseBodyPermissionsPermission, targetPort int, targetCidr string) bool {
+	if len(rules) != 1 {
+		return false
+	}
+
+	rule := rules[0]
+	if !strings.EqualFold(strings.TrimSpace(aliyunStringValue(rule.Policy)), "accept") {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(aliyunStringValue(rule.IpProtocol)), "tcp") {
+		return false
+	}
+	if !aliyunRulePortIsExact(rule.PortRange, targetPort) {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(aliyunStringValue(rule.SourceCidrIp)), targetCidr) {
+		return false
+	}
+
+	return true
+}
+
+func aliyunRulePortContainsTarget(portRangePtr *string, targetPort int, allowAll bool) bool {
+	portRange := strings.TrimSpace(aliyunStringValue(portRangePtr))
+	if portRange == "" {
+		return allowAll
+	}
+	if portRange == "-1/-1" {
+		return allowAll
+	}
+
+	fromPort, toPort, ok := parseAliyunPortRange(portRange)
+	if !ok {
+		return false
+	}
+
+	return targetPort >= fromPort && targetPort <= toPort
+}
+
+func aliyunRulePortIsExact(portRangePtr *string, targetPort int) bool {
+	portRange := strings.TrimSpace(aliyunStringValue(portRangePtr))
+	if portRange == "" || portRange == "-1/-1" {
+		return false
+	}
+
+	fromPort, toPort, ok := parseAliyunPortRange(portRange)
+	if !ok {
+		return false
+	}
+
+	return fromPort == targetPort && toPort == targetPort
+}
+
+func parseAliyunPortRange(portRange string) (int, int, bool) {
+	portRange = strings.TrimSpace(portRange)
+	if portRange == "" {
+		return 0, 0, false
+	}
+	if strings.Contains(portRange, "/") {
+		parts := strings.SplitN(portRange, "/", 2)
+		if len(parts) != 2 {
+			return 0, 0, false
+		}
+
+		fromPort, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+		if err != nil || fromPort <= 0 || fromPort > 65535 {
+			return 0, 0, false
+		}
+		toPort, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil || toPort <= 0 || toPort > 65535 {
+			return 0, 0, false
+		}
+		if fromPort > toPort {
+			return 0, 0, false
+		}
+		return fromPort, toPort, true
+	}
+
+	value, err := strconv.Atoi(portRange)
+	if err != nil || value <= 0 || value > 65535 {
+		return 0, 0, false
+	}
+	return value, value, true
+}
+
+func aliyunStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func describeTencentIngressPolicies(client *tencentVPC.Client, securityGroupID string) ([]*tencentVPC.SecurityGroupPolicy, error) {

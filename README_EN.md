@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Intelligent Tool for Automatically Updating Volcengine / AWS Lightsail / AWS EC2 / Tencent Cloud CVM Whitelist Access Rules**
+**Intelligent Tool for Automatically Updating Volcengine / AWS Lightsail / AWS EC2 / Tencent Cloud CVM / Alibaba Cloud ECS Whitelist Access Rules**
 
 [![Go Version](https://img.shields.io/badge/Go-1.20+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -23,13 +23,13 @@ Whitelist Manager is an automation tool developed in Go that monitors public IP 
 - **Security Hardening**: Restrict service access sources to prevent brute force attacks and unauthorized access
 - **Remote Work**: Automatically adapt to different network environments without manual security group rule modifications
 - **Multi-Port Management**: Manage whitelist access control for multiple service ports simultaneously
-- **Multi-Cloud Support**: Manage Volcengine security groups, AWS Lightsail, AWS EC2, and Tencent Cloud CVM rules in one workflow
+- **Multi-Cloud Support**: Manage Volcengine security groups, AWS Lightsail, AWS EC2, Tencent Cloud CVM, and Alibaba Cloud ECS rules in one workflow
 
 ### ✨ Key Features
 
 - 🔄 **Automatic Monitoring**: Periodic public IP change detection (default 15 minutes, customizable)
 - 🔐 **Auto Whitelist Updates**: Real-time synchronization of IP changes to cloud firewall rules
-- ☁️ **Multi-Provider Support**: Supports Volcengine, AWS Lightsail, AWS EC2, and Tencent Cloud CVM
+- ☁️ **Multi-Provider Support**: Supports Volcengine, AWS Lightsail, AWS EC2, Tencent Cloud CVM, and Alibaba Cloud ECS
 - 🌐 **Web Management Interface**: Visual configuration panel and log monitoring
 - 🚀 **Multi-Port Support**: Configure multiple ports at once (e.g., 22,8080,3389), comma-separated
 - 📊 **Complete Log Recording**: All operations are traceable with pagination support and clear function
@@ -72,7 +72,7 @@ whitelist-manager/
 - **Web Framework**: [Gin](https://github.com/gin-gonic/gin) - High-performance HTTP framework
 - **Task Scheduling**: [Cron v3](https://github.com/robfig/cron) - Reliable scheduled task scheduler
 - **Database**: [GORM](https://gorm.io/) + SQLite - Lightweight data persistence
-- **Cloud Service SDK**: [Volcengine Go SDK](https://github.com/volcengine/volcengine-go-sdk), [AWS SDK for Go](https://github.com/aws/aws-sdk-go), [Tencent Cloud SDK for Go](https://github.com/TencentCloud/tencentcloud-sdk-go)
+- **Cloud Service SDK**: [Volcengine Go SDK](https://github.com/volcengine/volcengine-go-sdk), [AWS SDK for Go](https://github.com/aws/aws-sdk-go), [Tencent Cloud SDK for Go](https://github.com/TencentCloud/tencentcloud-sdk-go), [Alibaba Cloud ECS SDK for Go](https://github.com/alibabacloud-go/ecs-20140526)
 
 ---
 
@@ -132,7 +132,7 @@ chmod +x whitelist-manager
 
    | Configuration | Description | Example |
    |--------------|-------------|---------|
-   | Providers | Cloud providers (multi-select) | `volcengine` + `aws` + `aws-ec2` + `tencent` |
+   | Providers | Cloud providers (multi-select) | `volcengine` + `aws` + `aws-ec2` + `tencent` + `aliyun` |
    | Volcengine Access Key | Volcengine API access key | `AKLT...` |
    | Volcengine Secret Key | Volcengine API secret key | *** |
    | Volcengine Region | Volcengine region | `cn-beijing` |
@@ -150,6 +150,11 @@ chmod +x whitelist-manager
    | Tencent Region | Tencent Cloud region | `ap-guangzhou` |
    | Tencent Security Group ID | Tencent Cloud security group ID | `sg-xxxxxx` |
    | Tencent Ports | Tencent managed ports (comma-separated) | `22,3389` |
+   | Aliyun AccessKey ID | Alibaba Cloud AccessKey ID | `LTAI...` |
+   | Aliyun AccessKey Secret | Alibaba Cloud AccessKey Secret | *** |
+   | Aliyun Region | Alibaba Cloud region | `cn-hangzhou` |
+   | Aliyun Security Group ID | Alibaba Cloud security group ID | `sg-xxxxxx` |
+   | Aliyun Ports | Alibaba Cloud managed ports (comma-separated) | `22,3389` |
    | Check Interval | Check interval | `15` (minutes) |
    | IP Services | IP query service list | Multiple backup sources pre-configured |
 
@@ -170,7 +175,7 @@ chmod +x whitelist-manager
 
 #### Settings Page (`/settings`)
 - Multi-select one or more cloud providers
-- Configure Volcengine, AWS, and Tencent Cloud credentials/resources separately
+- Configure Volcengine, AWS, Tencent Cloud, and Alibaba Cloud credentials/resources separately
 - Configure provider-specific port lists and check interval
 - Manage IP query service list
 
@@ -208,6 +213,7 @@ Volcengine Ports: 22,3389
 AWS Lightsail Ports: 22,80,443
 AWS EC2 Ports: 22,443
 Tencent Cloud Ports: 22,3389
+Alibaba Cloud Ports: 22,3389
 ```
 
 The program applies whitelist rules independently for each provider.
@@ -275,6 +281,7 @@ A: Make sure at least one provider is selected, then verify required fields for 
 - Volcengine: `Access Key` / `Secret Key` / `Region` / `Security Group ID` / `Volcengine Ports`
 - AWS: `AWS Access Key` / `AWS Secret Key` / `AWS Region` / `AWS Instance Name` / `AWS Ports`
 - Tencent Cloud: `SecretId` / `SecretKey` / `Region` / `Security Group ID` / `Tencent Ports`
+- Alibaba Cloud: `AccessKey ID` / `AccessKey Secret` / `Region` / `Security Group ID` / `Aliyun Ports`
 
 **Q: Cannot get public IP?**
 A: Check network connection or add more backup IP query services in settings.

@@ -59,12 +59,14 @@ func (h *Handler) GetStatusJSON(c *gin.Context) {
 		"AWSPorts":        firstNonEmpty(settings.AWSPorts, settings.SSHPort),
 		"AWSEC2Ports":     firstNonEmpty(settings.AWSEC2Ports, settings.SSHPort),
 		"TencentPorts":    firstNonEmpty(settings.TencentPorts, settings.SSHPort),
+		"AliyunPorts":     firstNonEmpty(settings.AliyunPorts, settings.SSHPort),
 		"Provider":        settings.Provider,
 		"Providers":       providers,
 		"VolcEnabled":     hasProvider(providers, "volcengine"),
 		"AWSEnabled":      hasProvider(providers, "aws"),
 		"AWSEC2Enabled":   hasProvider(providers, "aws-ec2"),
 		"TencentEnabled":  hasProvider(providers, "tencent"),
+		"AliyunEnabled":   hasProvider(providers, "aliyun"),
 	})
 }
 
@@ -103,6 +105,7 @@ func (h *Handler) Index(c *gin.Context) {
 		"AWSEnabled":     hasProvider(providers, "aws"),
 		"AWSEC2Enabled":  hasProvider(providers, "aws-ec2"),
 		"TencentEnabled": hasProvider(providers, "tencent"),
+		"AliyunEnabled":  hasProvider(providers, "aliyun"),
 	})
 }
 
@@ -126,6 +129,12 @@ func (h *Handler) SettingsPage(c *gin.Context) {
 	if strings.TrimSpace(settings.TencentPorts) == "" {
 		settings.TencentPorts = settings.SSHPort
 	}
+	if strings.TrimSpace(settings.AliyunRegion) == "" {
+		settings.AliyunRegion = "cn-hangzhou"
+	}
+	if strings.TrimSpace(settings.AliyunPorts) == "" {
+		settings.AliyunPorts = settings.SSHPort
+	}
 
 	// Convert CheckInterval (seconds) to human-readable form
 	intervalValue := settings.CheckInterval
@@ -147,6 +156,7 @@ func (h *Handler) SettingsPage(c *gin.Context) {
 		"AWSEnabled":         hasProvider(settings.Providers, "aws"),
 		"AWSEC2Enabled":      hasProvider(settings.Providers, "aws-ec2"),
 		"TencentEnabled":     hasProvider(settings.Providers, "tencent"),
+		"AliyunEnabled":      hasProvider(settings.Providers, "aliyun"),
 	})
 }
 
@@ -166,10 +176,15 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 		TencentSecretKey        string   `form:"tencent_secret_key"`
 		TencentRegion           string   `form:"tencent_region"`
 		TencentSecurityGroupID  string   `form:"tencent_security_group_id"`
+		AliyunAccessKey         string   `form:"aliyun_access_key"`
+		AliyunSecretKey         string   `form:"aliyun_secret_key"`
+		AliyunRegion            string   `form:"aliyun_region"`
+		AliyunSecurityGroupID   string   `form:"aliyun_security_group_id"`
 		VolcenginePorts         string   `form:"volcengine_ports"`
 		AWSPorts                string   `form:"aws_ports"`
 		AWSEC2Ports             string   `form:"aws_ec2_ports"`
 		TencentPorts            string   `form:"tencent_ports"`
+		AliyunPorts             string   `form:"aliyun_ports"`
 		CheckInterval           int      `form:"check_interval"`
 		IPServices              string   `form:"ip_services"`
 	}
@@ -187,6 +202,8 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 		settings.Provider = "aws"
 	case "tencent":
 		settings.Provider = "tencent"
+	case "aliyun":
+		settings.Provider = "aliyun"
 	case "":
 		settings.Provider = ""
 	default:
@@ -206,11 +223,16 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 	settings.TencentSecretKey = form.TencentSecretKey
 	settings.TencentRegion = form.TencentRegion
 	settings.TencentSecurityGroupID = form.TencentSecurityGroupID
+	settings.AliyunAccessKey = form.AliyunAccessKey
+	settings.AliyunSecretKey = form.AliyunSecretKey
+	settings.AliyunRegion = form.AliyunRegion
+	settings.AliyunSecurityGroupID = form.AliyunSecurityGroupID
 	settings.VolcenginePorts = form.VolcenginePorts
 	settings.AWSPorts = form.AWSPorts
 	settings.AWSEC2Ports = form.AWSEC2Ports
 	settings.TencentPorts = form.TencentPorts
-	settings.SSHPort = firstNonEmpty(form.VolcenginePorts, form.AWSPorts, form.AWSEC2Ports, form.TencentPorts)
+	settings.AliyunPorts = form.AliyunPorts
+	settings.SSHPort = firstNonEmpty(form.VolcenginePorts, form.AWSPorts, form.AWSEC2Ports, form.TencentPorts, form.AliyunPorts)
 	settings.CheckInterval = form.CheckInterval
 	settings.IPServices = form.IPServices
 
@@ -231,13 +253,13 @@ func normalizeProvidersFromForm(rawProviders []string) string {
 	seen := make(map[string]struct{}, len(rawProviders))
 	for _, provider := range rawProviders {
 		provider = strings.ToLower(strings.TrimSpace(provider))
-		if provider != "volcengine" && provider != "aws" && provider != "aws-ec2" && provider != "tencent" {
+		if provider != "volcengine" && provider != "aws" && provider != "aws-ec2" && provider != "tencent" && provider != "aliyun" {
 			continue
 		}
 		seen[provider] = struct{}{}
 	}
 
-	ordered := make([]string, 0, 4)
+	ordered := make([]string, 0, 5)
 	if _, ok := seen["volcengine"]; ok {
 		ordered = append(ordered, "volcengine")
 	}
@@ -249,6 +271,9 @@ func normalizeProvidersFromForm(rawProviders []string) string {
 	}
 	if _, ok := seen["tencent"]; ok {
 		ordered = append(ordered, "tencent")
+	}
+	if _, ok := seen["aliyun"]; ok {
+		ordered = append(ordered, "aliyun")
 	}
 	return strings.Join(ordered, ",")
 }

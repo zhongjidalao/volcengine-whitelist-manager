@@ -25,6 +25,11 @@ type Settings struct {
 	TencentRegion          string `gorm:"size:50;default:'ap-guangzhou'"`
 	TencentSecurityGroupID string `gorm:"size:255"`
 	TencentPorts           string `gorm:"size:50;default:'22'"`
+	AliyunAccessKey        string `gorm:"size:100"` // Alibaba Cloud AccessKey ID
+	AliyunSecretKey        string `gorm:"size:100"` // Alibaba Cloud AccessKey Secret
+	AliyunRegion           string `gorm:"size:50;default:'cn-hangzhou'"`
+	AliyunSecurityGroupID  string `gorm:"size:255"`
+	AliyunPorts            string `gorm:"size:50;default:'22'"`
 	SSHPort                string `gorm:"size:50;default:'22'"`
 	CheckInterval          int    `gorm:"default:900"` // Seconds
 	IPServices             string `gorm:"type:text;default:'https://myip.ipip.net\nhttps://ddns.oray.com/checkip\nhttps://ip.3322.net\nhttps://v4.yinghualuo.cn/bejson'"`

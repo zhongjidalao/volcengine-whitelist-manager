@@ -68,6 +68,14 @@ func InitDB() {
 				settings.TencentPorts = settings.SSHPort
 				changed = true
 			}
+			if strings.TrimSpace(settings.AliyunRegion) == "" {
+				settings.AliyunRegion = "cn-hangzhou"
+				changed = true
+			}
+			if strings.TrimSpace(settings.AliyunPorts) == "" {
+				settings.AliyunPorts = settings.SSHPort
+				changed = true
+			}
 
 			// Migrate legacy AWS single-provider settings to dedicated AWS fields.
 			if strings.EqualFold(strings.TrimSpace(settings.Provider), "aws") {
@@ -99,6 +107,24 @@ func InitDB() {
 				}
 				if strings.TrimSpace(settings.TencentSecurityGroupID) == "" {
 					settings.TencentSecurityGroupID = settings.SecurityGroupID
+					changed = true
+				}
+			}
+			if strings.EqualFold(strings.TrimSpace(settings.Provider), "aliyun") {
+				if strings.TrimSpace(settings.AliyunAccessKey) == "" {
+					settings.AliyunAccessKey = settings.AccessKey
+					changed = true
+				}
+				if strings.TrimSpace(settings.AliyunSecretKey) == "" {
+					settings.AliyunSecretKey = settings.SecretKey
+					changed = true
+				}
+				if strings.TrimSpace(settings.AliyunRegion) == "" {
+					settings.AliyunRegion = settings.Region
+					changed = true
+				}
+				if strings.TrimSpace(settings.AliyunSecurityGroupID) == "" {
+					settings.AliyunSecurityGroupID = settings.SecurityGroupID
 					changed = true
 				}
 			}

@@ -26,6 +26,10 @@
                             <input class="form-check-input" type="checkbox" id="provider_tencent" name="providers" value="tencent" {{ if .TencentEnabled }}checked{{ end }}>
                             <label class="form-check-label" for="provider_tencent">Tencent Cloud CVM</label>
                         </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="provider_aliyun" name="providers" value="aliyun" {{ if .AliyunEnabled }}checked{{ end }}>
+                            <label class="form-check-label" for="provider_aliyun">Alibaba Cloud ECS</label>
+                        </div>
                         <div class="form-text">可同时启用多个供应商；每个供应商使用独立配置。</div>
                     </div>
 
@@ -127,6 +131,32 @@
                         </div>
                     </div>
 
+                    <div class="border rounded p-3 mb-3" id="aliyun_section">
+                        <h6 class="mb-3">Alibaba Cloud ECS 配置</h6>
+                        <div class="mb-3">
+                            <label for="aliyun_access_key" class="form-label">AccessKey ID</label>
+                            <input type="text" class="form-control" id="aliyun_access_key" name="aliyun_access_key" value="{{ .Settings.AliyunAccessKey }}">
+                        </div>
+                        <div class="mb-3">
+                            <label for="aliyun_secret_key" class="form-label">AccessKey Secret</label>
+                            <input type="password" class="form-control" id="aliyun_secret_key" name="aliyun_secret_key" value="{{ .Settings.AliyunSecretKey }}">
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="aliyun_region" class="form-label">区域 (Region)</label>
+                                <input type="text" class="form-control" id="aliyun_region" name="aliyun_region" value="{{ .Settings.AliyunRegion }}" placeholder="cn-hangzhou">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="aliyun_security_group_id" class="form-label">安全组 ID</label>
+                                <input type="text" class="form-control" id="aliyun_security_group_id" name="aliyun_security_group_id" value="{{ .Settings.AliyunSecurityGroupID }}">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="aliyun_ports" class="form-label">管理端口 (多个用逗号分隔)</label>
+                            <input type="text" class="form-control" id="aliyun_ports" name="aliyun_ports" value="{{ if .Settings.AliyunPorts }}{{ .Settings.AliyunPorts }}{{ else }}{{ .Settings.SSHPort }}{{ end }}" placeholder="22,8080">
+                        </div>
+                    </div>
+
                     <div class="mb-3">
                         <div class="form-text">密钥将明文保存在本地 SQLite 数据库中，请确保服务器安全。</div>
                     </div>
@@ -168,11 +198,13 @@
     const providerAWSCheckbox = document.getElementById('provider_aws');
     const providerAWSEC2Checkbox = document.getElementById('provider_aws_ec2');
     const providerTencentCheckbox = document.getElementById('provider_tencent');
+    const providerAliyunCheckbox = document.getElementById('provider_aliyun');
     const volcengineSection = document.getElementById('volcengine_section');
     const awsCommonSection = document.getElementById('aws_common_section');
     const awsLightsailSection = document.getElementById('aws_lightsail_section');
     const awsEC2Section = document.getElementById('aws_ec2_section');
     const tencentSection = document.getElementById('tencent_section');
+    const aliyunSection = document.getElementById('aliyun_section');
     const volcengineRequiredFields = [
         document.getElementById('volcengine_access_key'),
         document.getElementById('volcengine_secret_key'),
@@ -199,6 +231,13 @@
         document.getElementById('tencent_region'),
         document.getElementById('tencent_security_group_id'),
         document.getElementById('tencent_ports')
+    ];
+    const aliyunRequiredFields = [
+        document.getElementById('aliyun_access_key'),
+        document.getElementById('aliyun_secret_key'),
+        document.getElementById('aliyun_region'),
+        document.getElementById('aliyun_security_group_id'),
+        document.getElementById('aliyun_ports')
     ];
 
     function updateIntervalSeconds() {
@@ -229,6 +268,7 @@
         const awsLightsailEnabled = providerAWSCheckbox.checked;
         const awsEC2Enabled = providerAWSEC2Checkbox.checked;
         const tencentEnabled = providerTencentCheckbox.checked;
+        const aliyunEnabled = providerAliyunCheckbox.checked;
         const awsCommonEnabled = awsLightsailEnabled || awsEC2Enabled;
 
         volcengineSection.style.display = volcEnabled ? '' : 'none';
@@ -236,12 +276,14 @@
         awsLightsailSection.style.display = awsLightsailEnabled ? '' : 'none';
         awsEC2Section.style.display = awsEC2Enabled ? '' : 'none';
         tencentSection.style.display = tencentEnabled ? '' : 'none';
+        aliyunSection.style.display = aliyunEnabled ? '' : 'none';
 
         setFieldsRequired(volcengineRequiredFields, volcEnabled);
         setFieldsRequired(awsCommonRequiredFields, awsCommonEnabled);
         setFieldsRequired(awsLightsailRequiredFields, awsLightsailEnabled);
         setFieldsRequired(awsEC2RequiredFields, awsEC2Enabled);
         setFieldsRequired(tencentRequiredFields, tencentEnabled);
+        setFieldsRequired(aliyunRequiredFields, aliyunEnabled);
     }
 
     intervalValueInput.addEventListener('input', updateIntervalSeconds);
@@ -250,6 +292,7 @@
     providerAWSCheckbox.addEventListener('change', updateProviderSections);
     providerAWSEC2Checkbox.addEventListener('change', updateProviderSections);
     providerTencentCheckbox.addEventListener('change', updateProviderSections);
+    providerAliyunCheckbox.addEventListener('change', updateProviderSections);
 
     // Initial update on page load
     updateIntervalSeconds();
