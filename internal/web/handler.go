@@ -37,13 +37,7 @@ func (h *Handler) ClearLogs(c *gin.Context) {
 
 func (h *Handler) GetStatusJSON(c *gin.Context) {
 	settings := config.GetSettings()
-	providers := strings.TrimSpace(settings.Providers)
-	if providers == "" {
-		providers = strings.TrimSpace(settings.Provider)
-	}
-	if providers == "" {
-		providers = "volcengine"
-	}
+	providers := resolveProviders(settings)
 
 	var nextRun string
 	if h.JobID != 0 {
@@ -64,8 +58,13 @@ func (h *Handler) GetStatusJSON(c *gin.Context) {
 		"VolcenginePorts": firstNonEmpty(settings.VolcenginePorts, settings.SSHPort),
 		"AWSPorts":        firstNonEmpty(settings.AWSPorts, settings.SSHPort),
 		"AWSEC2Ports":     firstNonEmpty(settings.AWSEC2Ports, settings.SSHPort),
+		"TencentPorts":    firstNonEmpty(settings.TencentPorts, settings.SSHPort),
 		"Provider":        settings.Provider,
 		"Providers":       providers,
+		"VolcEnabled":     hasProvider(providers, "volcengine"),
+		"AWSEnabled":      hasProvider(providers, "aws"),
+		"AWSEC2Enabled":   hasProvider(providers, "aws-ec2"),
+		"TencentEnabled":  hasProvider(providers, "tencent"),
 	})
 }
 
@@ -77,6 +76,7 @@ func (h *Handler) GetLogsJSON(c *gin.Context) {
 
 func (h *Handler) Index(c *gin.Context) {
 	settings := config.GetSettings()
+	providers := resolveProviders(settings)
 	var logs []models.UpdateLog
 	config.DB.Order("timestamp desc").Limit(10).Find(&logs)
 
@@ -95,10 +95,14 @@ func (h *Handler) Index(c *gin.Context) {
 	flash := c.Query("flash")
 
 	c.HTML(http.StatusOK, "index.html", gin.H{
-		"Settings": settings,
-		"Logs":     logs,
-		"NextRun":  nextRun,
-		"Flash":    flash,
+		"Settings":       settings,
+		"Logs":           logs,
+		"NextRun":        nextRun,
+		"Flash":          flash,
+		"VolcEnabled":    hasProvider(providers, "volcengine"),
+		"AWSEnabled":     hasProvider(providers, "aws"),
+		"AWSEC2Enabled":  hasProvider(providers, "aws-ec2"),
+		"TencentEnabled": hasProvider(providers, "tencent"),
 	})
 }
 
@@ -118,6 +122,9 @@ func (h *Handler) SettingsPage(c *gin.Context) {
 	}
 	if strings.TrimSpace(settings.AWSEC2Ports) == "" {
 		settings.AWSEC2Ports = settings.SSHPort
+	}
+	if strings.TrimSpace(settings.TencentPorts) == "" {
+		settings.TencentPorts = settings.SSHPort
 	}
 
 	// Convert CheckInterval (seconds) to human-readable form
@@ -139,6 +146,7 @@ func (h *Handler) SettingsPage(c *gin.Context) {
 		"VolcEnabled":        hasProvider(settings.Providers, "volcengine"),
 		"AWSEnabled":         hasProvider(settings.Providers, "aws"),
 		"AWSEC2Enabled":      hasProvider(settings.Providers, "aws-ec2"),
+		"TencentEnabled":     hasProvider(settings.Providers, "tencent"),
 	})
 }
 
@@ -154,9 +162,14 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 		AWSRegion               string   `form:"aws_region"`
 		AWSInstanceName         string   `form:"aws_instance_name"`
 		AWSEC2SecurityGroupID   string   `form:"aws_ec2_security_group_id"`
+		TencentSecretID         string   `form:"tencent_secret_id"`
+		TencentSecretKey        string   `form:"tencent_secret_key"`
+		TencentRegion           string   `form:"tencent_region"`
+		TencentSecurityGroupID  string   `form:"tencent_security_group_id"`
 		VolcenginePorts         string   `form:"volcengine_ports"`
 		AWSPorts                string   `form:"aws_ports"`
 		AWSEC2Ports             string   `form:"aws_ec2_ports"`
+		TencentPorts            string   `form:"tencent_ports"`
 		CheckInterval           int      `form:"check_interval"`
 		IPServices              string   `form:"ip_services"`
 	}
@@ -172,6 +185,8 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 	switch providers {
 	case "aws":
 		settings.Provider = "aws"
+	case "tencent":
+		settings.Provider = "tencent"
 	case "":
 		settings.Provider = ""
 	default:
@@ -187,10 +202,15 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 	settings.AWSRegion = form.AWSRegion
 	settings.AWSInstanceName = form.AWSInstanceName
 	settings.AWSEC2SecurityGroupID = form.AWSEC2SecurityGroupID
+	settings.TencentSecretID = form.TencentSecretID
+	settings.TencentSecretKey = form.TencentSecretKey
+	settings.TencentRegion = form.TencentRegion
+	settings.TencentSecurityGroupID = form.TencentSecurityGroupID
 	settings.VolcenginePorts = form.VolcenginePorts
 	settings.AWSPorts = form.AWSPorts
 	settings.AWSEC2Ports = form.AWSEC2Ports
-	settings.SSHPort = firstNonEmpty(form.VolcenginePorts, form.AWSPorts, form.AWSEC2Ports)
+	settings.TencentPorts = form.TencentPorts
+	settings.SSHPort = firstNonEmpty(form.VolcenginePorts, form.AWSPorts, form.AWSEC2Ports, form.TencentPorts)
 	settings.CheckInterval = form.CheckInterval
 	settings.IPServices = form.IPServices
 
@@ -211,13 +231,13 @@ func normalizeProvidersFromForm(rawProviders []string) string {
 	seen := make(map[string]struct{}, len(rawProviders))
 	for _, provider := range rawProviders {
 		provider = strings.ToLower(strings.TrimSpace(provider))
-		if provider != "volcengine" && provider != "aws" && provider != "aws-ec2" {
+		if provider != "volcengine" && provider != "aws" && provider != "aws-ec2" && provider != "tencent" {
 			continue
 		}
 		seen[provider] = struct{}{}
 	}
 
-	ordered := make([]string, 0, 2)
+	ordered := make([]string, 0, 4)
 	if _, ok := seen["volcengine"]; ok {
 		ordered = append(ordered, "volcengine")
 	}
@@ -227,7 +247,21 @@ func normalizeProvidersFromForm(rawProviders []string) string {
 	if _, ok := seen["aws-ec2"]; ok {
 		ordered = append(ordered, "aws-ec2")
 	}
+	if _, ok := seen["tencent"]; ok {
+		ordered = append(ordered, "tencent")
+	}
 	return strings.Join(ordered, ",")
+}
+
+func resolveProviders(settings *models.Settings) string {
+	providers := strings.TrimSpace(settings.Providers)
+	if providers == "" {
+		providers = strings.TrimSpace(settings.Provider)
+	}
+	if providers == "" {
+		providers = "volcengine"
+	}
+	return providers
 }
 
 func hasProvider(providersCSV, target string) bool {

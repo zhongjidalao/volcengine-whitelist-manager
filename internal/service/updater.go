@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,9 @@ import (
 	awsSession "github.com/aws/aws-sdk-go/aws/session"
 	awsec2 "github.com/aws/aws-sdk-go/service/ec2"
 	awslightsail "github.com/aws/aws-sdk-go/service/lightsail"
+	tencentCommon "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
+	tencentProfile "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
+	tencentVPC "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc/v20170312"
 	"github.com/volcengine/volcengine-go-sdk/service/vpc"
 	"github.com/volcengine/volcengine-go-sdk/volcengine"
 	volcCredentials "github.com/volcengine/volcengine-go-sdk/volcengine/credentials"
@@ -28,6 +32,7 @@ const (
 	providerVolcengine = "volcengine"
 	providerAWS        = "aws"
 	providerAWSEC2     = "aws-ec2"
+	providerTencent    = "tencent"
 )
 
 // CheckAndUpdate is the main entry point for the scheduled task
@@ -69,6 +74,8 @@ func CheckAndUpdate() {
 			updateAWSLightsailFirewall(settings, currentIP, ports)
 		case providerAWSEC2:
 			updateAWSEC2SecurityGroup(settings, currentIP, ports)
+		case providerTencent:
+			updateTencentSecurityGroup(settings, currentIP, ports)
 		default:
 			updateVolcengineSecurityGroup(settings, currentIP, ports)
 		}
@@ -84,8 +91,8 @@ func normalizeProviders(providersStr, legacyProvider string) []string {
 		raw = providerVolcengine
 	}
 
-	providers := make([]string, 0, 2)
-	seen := make(map[string]struct{}, 2)
+	providers := make([]string, 0, 4)
+	seen := make(map[string]struct{}, 4)
 	for _, item := range strings.Split(raw, ",") {
 		provider, ok := normalizeProvider(item)
 		if !ok {
@@ -109,6 +116,8 @@ func normalizeProvider(provider string) (string, bool) {
 		return providerAWS, true
 	case providerAWSEC2:
 		return providerAWSEC2, true
+	case providerTencent:
+		return providerTencent, true
 	default:
 		return "", false
 	}
@@ -142,6 +151,19 @@ func validateSettings(settings *models.Settings, provider string) error {
 		}
 		if strings.TrimSpace(settings.AWSEC2SecurityGroupID) == "" {
 			missing = append(missing, "AWS_EC2_SG_ID")
+		}
+	case providerTencent:
+		if strings.TrimSpace(settings.TencentSecretID) == "" {
+			missing = append(missing, "Tencent_SecretID")
+		}
+		if strings.TrimSpace(settings.TencentSecretKey) == "" {
+			missing = append(missing, "Tencent_SecretKey")
+		}
+		if strings.TrimSpace(settings.TencentRegion) == "" {
+			missing = append(missing, "Tencent_Region")
+		}
+		if strings.TrimSpace(settings.TencentSecurityGroupID) == "" {
+			missing = append(missing, "Tencent_SG_ID")
 		}
 	default:
 		if strings.TrimSpace(settings.AccessKey) == "" {
@@ -256,6 +278,10 @@ func getPortsByProvider(settings *models.Settings, provider string) string {
 		}
 	case providerAWSEC2:
 		if ports := strings.TrimSpace(settings.AWSEC2Ports); ports != "" {
+			return ports
+		}
+	case providerTencent:
+		if ports := strings.TrimSpace(settings.TencentPorts); ports != "" {
 			return ports
 		}
 	default:
@@ -525,6 +551,233 @@ func updateAWSEC2SecurityGroup(settings *models.Settings, currentIP string, port
 			config.Log("INFO", fmt.Sprintf("✓ provider=aws-ec2 端口 %d: 已更新允许 %s", targetPort, newCidr))
 		}
 	}
+}
+
+func updateTencentSecurityGroup(settings *models.Settings, currentIP string, ports []int) {
+	client, err := tencentVPC.NewClient(
+		tencentCommon.NewCredential(
+			strings.TrimSpace(settings.TencentSecretID),
+			strings.TrimSpace(settings.TencentSecretKey),
+		),
+		strings.TrimSpace(settings.TencentRegion),
+		tencentProfile.NewClientProfile(),
+	)
+	if err != nil {
+		config.Log("ERROR", fmt.Sprintf("provider=tencent: 创建腾讯云会话失败: %v", err))
+		return
+	}
+
+	securityGroupID := strings.TrimSpace(settings.TencentSecurityGroupID)
+	newCidr := fmt.Sprintf("%s/32", currentIP)
+
+	for _, targetPort := range ports {
+		ingressRules, err := describeTencentIngressPolicies(client, securityGroupID)
+		if err != nil {
+			config.Log("ERROR", fmt.Sprintf("provider=tencent: 获取安全组规则失败: %v", err))
+			return
+		}
+
+		matchedRules := findManagedTencentIngressRules(ingressRules, targetPort)
+		if isTencentPortSynced(matchedRules, targetPort, newCidr) {
+			config.Log("INFO", fmt.Sprintf("provider=tencent 端口 %d: IP未变 (%s)，无需更新", targetPort, currentIP))
+			continue
+		}
+
+		policyIndexes := collectTencentPolicyIndexes(matchedRules)
+		if len(policyIndexes) > 0 {
+			sort.Slice(policyIndexes, func(i, j int) bool {
+				return policyIndexes[i] > policyIndexes[j]
+			})
+
+			for _, policyIndex := range policyIndexes {
+				config.Log("INFO", fmt.Sprintf("provider=tencent 端口 %d: 撤销旧规则 index=%d", targetPort, policyIndex))
+				deleteReq := tencentVPC.NewDeleteSecurityGroupPoliciesRequest()
+				deleteReq.SecurityGroupId = tencentCommon.StringPtr(securityGroupID)
+				deleteReq.SecurityGroupPolicySet = &tencentVPC.SecurityGroupPolicySet{
+					Ingress: []*tencentVPC.SecurityGroupPolicy{
+						{
+							PolicyIndex: tencentCommon.Int64Ptr(policyIndex),
+						},
+					},
+				}
+				if _, err = client.DeleteSecurityGroupPolicies(deleteReq); err != nil {
+					config.Log("WARNING", fmt.Sprintf("provider=tencent 端口 %d: 撤销旧规则失败(index=%d): %v", targetPort, policyIndex, err))
+				}
+			}
+		} else {
+			config.Log("INFO", fmt.Sprintf("provider=tencent 端口 %d: 未找到现有规则，将添加新规则", targetPort))
+		}
+
+		config.Log("INFO", fmt.Sprintf("provider=tencent 端口 %d: 添加新规则 %s", targetPort, newCidr))
+		createReq := tencentVPC.NewCreateSecurityGroupPoliciesRequest()
+		createReq.SecurityGroupId = tencentCommon.StringPtr(securityGroupID)
+		createReq.SecurityGroupPolicySet = &tencentVPC.SecurityGroupPolicySet{
+			Ingress: []*tencentVPC.SecurityGroupPolicy{
+				{
+					Action:            tencentCommon.StringPtr("ACCEPT"),
+					Protocol:          tencentCommon.StringPtr("TCP"),
+					Port:              tencentCommon.StringPtr(strconv.Itoa(targetPort)),
+					CidrBlock:         tencentCommon.StringPtr(newCidr),
+					PolicyDescription: tencentCommon.StringPtr(fmt.Sprintf("白名单访问(端口%d) - Go脚本自动更新", targetPort)),
+				},
+			},
+		}
+		if _, err = client.CreateSecurityGroupPolicies(createReq); err != nil {
+			config.Log("ERROR", fmt.Sprintf("provider=tencent 端口 %d: 授权失败: %v", targetPort, err))
+		} else {
+			config.Log("INFO", fmt.Sprintf("✓ provider=tencent 端口 %d: 已更新允许 %s", targetPort, newCidr))
+		}
+	}
+}
+
+func describeTencentIngressPolicies(client *tencentVPC.Client, securityGroupID string) ([]*tencentVPC.SecurityGroupPolicy, error) {
+	req := tencentVPC.NewDescribeSecurityGroupPoliciesRequest()
+	req.SecurityGroupId = tencentCommon.StringPtr(securityGroupID)
+
+	resp, err := client.DescribeSecurityGroupPolicies(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || resp.Response == nil || resp.Response.SecurityGroupPolicySet == nil {
+		return nil, nil
+	}
+	return resp.Response.SecurityGroupPolicySet.Ingress, nil
+}
+
+func findManagedTencentIngressRules(rules []*tencentVPC.SecurityGroupPolicy, targetPort int) []*tencentVPC.SecurityGroupPolicy {
+	matched := make([]*tencentVPC.SecurityGroupPolicy, 0, 4)
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(tencentStringValue(rule.Action)), "ACCEPT") {
+			continue
+		}
+		if strings.TrimSpace(tencentStringValue(rule.CidrBlock)) == "" {
+			continue
+		}
+
+		protocol := strings.ToUpper(strings.TrimSpace(tencentStringValue(rule.Protocol)))
+		if protocol != "TCP" && protocol != "ALL" {
+			continue
+		}
+		if !tencentRulePortContainsTarget(rule.Port, targetPort, protocol == "ALL") {
+			continue
+		}
+
+		matched = append(matched, rule)
+	}
+
+	return matched
+}
+
+func isTencentPortSynced(rules []*tencentVPC.SecurityGroupPolicy, targetPort int, targetCidr string) bool {
+	if len(rules) != 1 {
+		return false
+	}
+
+	rule := rules[0]
+	if !strings.EqualFold(strings.TrimSpace(tencentStringValue(rule.Action)), "ACCEPT") {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(tencentStringValue(rule.Protocol)), "TCP") {
+		return false
+	}
+	if !tencentRulePortIsExact(rule.Port, targetPort) {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(tencentStringValue(rule.CidrBlock)), targetCidr) {
+		return false
+	}
+
+	return true
+}
+
+func collectTencentPolicyIndexes(rules []*tencentVPC.SecurityGroupPolicy) []int64 {
+	indexes := make([]int64, 0, len(rules))
+	seen := make(map[int64]struct{}, len(rules))
+
+	for _, rule := range rules {
+		if rule == nil || rule.PolicyIndex == nil {
+			continue
+		}
+		index := *rule.PolicyIndex
+		if _, ok := seen[index]; ok {
+			continue
+		}
+		seen[index] = struct{}{}
+		indexes = append(indexes, index)
+	}
+
+	return indexes
+}
+
+func tencentRulePortContainsTarget(portPtr *string, targetPort int, allowAll bool) bool {
+	port := strings.TrimSpace(tencentStringValue(portPtr))
+	if port == "" {
+		return allowAll
+	}
+	if strings.EqualFold(port, "all") {
+		return true
+	}
+
+	fromPort, toPort, ok := parseTencentPortRange(port)
+	if !ok {
+		return false
+	}
+	return targetPort >= fromPort && targetPort <= toPort
+}
+
+func tencentRulePortIsExact(portPtr *string, targetPort int) bool {
+	port := strings.TrimSpace(tencentStringValue(portPtr))
+	if port == "" || strings.EqualFold(port, "all") {
+		return false
+	}
+
+	fromPort, toPort, ok := parseTencentPortRange(port)
+	if !ok {
+		return false
+	}
+	return fromPort == targetPort && toPort == targetPort
+}
+
+func parseTencentPortRange(port string) (int, int, bool) {
+	port = strings.TrimSpace(port)
+	if port == "" {
+		return 0, 0, false
+	}
+
+	if strings.Contains(port, "-") {
+		parts := strings.SplitN(port, "-", 2)
+		if len(parts) != 2 {
+			return 0, 0, false
+		}
+		fromPort, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+		if err != nil || fromPort <= 0 || fromPort > 65535 {
+			return 0, 0, false
+		}
+		toPort, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil || toPort <= 0 || toPort > 65535 {
+			return 0, 0, false
+		}
+		if fromPort > toPort {
+			return 0, 0, false
+		}
+		return fromPort, toPort, true
+	}
+
+	value, err := strconv.Atoi(port)
+	if err != nil || value <= 0 || value > 65535 {
+		return 0, 0, false
+	}
+	return value, value, true
+}
+
+func tencentStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func findManagedAWSEC2Rules(rules []*awsec2.SecurityGroupRule, targetPort int) []*awsec2.SecurityGroupRule {

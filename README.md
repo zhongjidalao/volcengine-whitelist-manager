@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**自动更新 Volcengine / AWS Lightsail / AWS EC2 白名单访问规则的智能工具**
+**自动更新 Volcengine / AWS Lightsail / AWS EC2 / Tencent Cloud CVM 白名单访问规则的智能工具**
 
 [![Go Version](https://img.shields.io/badge/Go-1.20+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -23,13 +23,13 @@ Whitelist Manager 是一个基于 Go 语言开发的自动化工具,用于实时
 - **安全加固**: 限制服务访问来源,防止暴力破解和未授权访问
 - **远程办公**: 自动适应不同网络环境,无需手动修改安全组规则
 - **多端口管理**: 同时管理多个服务端口的白名单访问控制
-- **多云支持**: 统一管理 Volcengine 安全组、AWS Lightsail 与 AWS EC2 规则
+- **多云支持**: 统一管理 Volcengine 安全组、AWS Lightsail、AWS EC2 与 Tencent Cloud CVM 规则
 
 ### ✨ 核心特性
 
 - 🔄 **自动监控**: 定时检查公网 IP 变化(默认 15 分钟,可自定义)
 - 🔐 **白名单自动更新**: 实时同步 IP 变化到云防火墙规则
-- ☁️ **多供应商支持**: 支持 Volcengine、AWS Lightsail、AWS EC2
+- ☁️ **多供应商支持**: 支持 Volcengine、AWS Lightsail、AWS EC2、Tencent Cloud CVM
 - 🌐 **Web 管理界面**: 提供可视化配置面板和日志监控
 - 🚀 **多端口支持**: 一次配置多个端口(如 22,8080,3389),逗号分隔
 - 📊 **完整日志记录**: 所有操作可追溯,支持分页查看和清空
@@ -72,7 +72,7 @@ whitelist-manager/
 - **Web 框架**: [Gin](https://github.com/gin-gonic/gin) - 高性能 HTTP 框架
 - **任务调度**: [Cron v3](https://github.com/robfig/cron) - 可靠的定时任务调度器
 - **数据库**: [GORM](https://gorm.io/) + SQLite - 轻量级数据持久化
-- **云服务 SDK**: [Volcengine Go SDK](https://github.com/volcengine/volcengine-go-sdk), [AWS SDK for Go](https://github.com/aws/aws-sdk-go)
+- **云服务 SDK**: [Volcengine Go SDK](https://github.com/volcengine/volcengine-go-sdk), [AWS SDK for Go](https://github.com/aws/aws-sdk-go), [Tencent Cloud SDK for Go](https://github.com/TencentCloud/tencentcloud-sdk-go)
 
 ---
 
@@ -80,8 +80,8 @@ whitelist-manager/
 
 ### 系统要求
 
-- **编译环境**: Go 1.20 或更高版本
-- **运行环境**: Linux / macOS / Windows
+- **编译环境**: Go 1.20 或更高版本 (仅源码编译或开发模式需要)
+- **运行环境**: Linux / macOS
 - **网络要求**: 能够访问云厂商 API 和公网 IP 查询服务
 
 ### 安装步骤
@@ -109,6 +109,17 @@ go build -o whitelist-manager cmd/server/main.go
 go run cmd/server/main.go
 ```
 
+#### 方法三: 从 Release 下载可执行文件运行
+
+```bash
+# 1. 打开最新发布页并下载 Linux/macOS 对应的可执行文件
+# <repository-url>/releases/latest
+
+# 2. Linux/macOS: 添加执行权限并启动
+chmod +x whitelist-manager
+./whitelist-manager
+```
+
 ### 初始配置
 
 1. **启动服务**
@@ -121,7 +132,7 @@ go run cmd/server/main.go
 
    | 配置项 | 说明 | 示例 |
    |--------|------|------|
-   | Providers | 云供应商(可多选) | `volcengine` + `aws` + `aws-ec2` |
+   | Providers | 云供应商(可多选) | `volcengine` + `aws` + `aws-ec2` + `tencent` |
    | Volcengine Access Key | Volcengine 访问密钥 | `AKLT...` |
    | Volcengine Secret Key | Volcengine 私钥 | *** |
    | Volcengine Region | Volcengine 区域 | `cn-beijing` |
@@ -134,6 +145,11 @@ go run cmd/server/main.go
    | AWS Ports | AWS 管理端口(逗号分隔) | `22,80,443` |
    | AWS EC2 Security Group ID | EC2 安全组 ID | `sg-abcdef123456` |
    | AWS EC2 Ports | AWS EC2 管理端口(逗号分隔) | `22,443` |
+   | Tencent SecretId | 腾讯云 API SecretId | `AKID...` |
+   | Tencent SecretKey | 腾讯云 API SecretKey | *** |
+   | Tencent Region | 腾讯云区域 | `ap-guangzhou` |
+   | Tencent Security Group ID | 腾讯云安全组 ID | `sg-xxxxxx` |
+   | Tencent Ports | 腾讯云管理端口(逗号分隔) | `22,3389` |
    | Check Interval | 检查间隔 | `15` (分钟) |
    | IP Services | IP 查询服务列表 | 默认已配置多个备用源 |
 
@@ -154,7 +170,7 @@ go run cmd/server/main.go
 
 #### 设置页面 (`/settings`)
 - 复选选择一个或多个云供应商
-- 分别配置 Volcengine 与 AWS 的凭证和资源
+- 分别配置 Volcengine、AWS 与腾讯云的凭证和资源
 - 分别配置各供应商端口与检查间隔
 - 管理 IP 查询服务列表
 
@@ -191,6 +207,7 @@ POST /logs/clear
 Volcengine Ports: 22,3389
 AWS Lightsail Ports: 22,80,443
 AWS EC2 Ports: 22,443
+Tencent Cloud Ports: 22,3389
 ```
 
 程序会按供应商分别处理端口白名单，互不影响。
@@ -244,7 +261,7 @@ go build -ldflags="-s -w" -o whitelist-manager cmd/server/main.go
 
 # 跨平台编译
 GOOS=linux GOARCH=amd64 go build -o whitelist-manager-linux cmd/server/main.go
-GOOS=windows GOARCH=amd64 go build -o whitelist-manager.exe cmd/server/main.go
+GOOS=linux GOARCH=arm64 go build -o whitelist-manager-linux-arm64 cmd/server/main.go
 ```
 
 ---
@@ -257,6 +274,7 @@ GOOS=windows GOARCH=amd64 go build -o whitelist-manager.exe cmd/server/main.go
 A: 先确认至少勾选了一个供应商，然后检查该供应商对应字段是否完整:
 - Volcengine: `Access Key` / `Secret Key` / `Region` / `Security Group ID` / `Volcengine Ports`
 - AWS: `AWS Access Key` / `AWS Secret Key` / `AWS Region` / `AWS Instance Name` / `AWS Ports`
+- Tencent Cloud: `SecretId` / `SecretKey` / `Region` / `Security Group ID` / `Tencent Ports`
 
 **Q: 无法获取公网 IP?**
 A: 检查网络连接,或在设置中添加更多备用 IP 查询服务。

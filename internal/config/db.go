@@ -60,6 +60,14 @@ func InitDB() {
 				settings.AWSEC2Ports = settings.SSHPort
 				changed = true
 			}
+			if strings.TrimSpace(settings.TencentRegion) == "" {
+				settings.TencentRegion = "ap-guangzhou"
+				changed = true
+			}
+			if strings.TrimSpace(settings.TencentPorts) == "" {
+				settings.TencentPorts = settings.SSHPort
+				changed = true
+			}
 
 			// Migrate legacy AWS single-provider settings to dedicated AWS fields.
 			if strings.EqualFold(strings.TrimSpace(settings.Provider), "aws") {
@@ -77,6 +85,20 @@ func InitDB() {
 				}
 				if strings.TrimSpace(settings.AWSInstanceName) == "" {
 					settings.AWSInstanceName = settings.SecurityGroupID
+					changed = true
+				}
+			}
+			if strings.EqualFold(strings.TrimSpace(settings.Provider), "tencent") {
+				if strings.TrimSpace(settings.TencentSecretID) == "" {
+					settings.TencentSecretID = settings.AccessKey
+					changed = true
+				}
+				if strings.TrimSpace(settings.TencentSecretKey) == "" {
+					settings.TencentSecretKey = settings.SecretKey
+					changed = true
+				}
+				if strings.TrimSpace(settings.TencentSecurityGroupID) == "" {
+					settings.TencentSecurityGroupID = settings.SecurityGroupID
 					changed = true
 				}
 			}

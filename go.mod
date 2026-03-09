@@ -7,6 +7,7 @@ require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/glebarez/sqlite v1.11.0
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/tencentcloud/tencentcloud-sdk-go v3.0.233+incompatible
 	github.com/volcengine/volcengine-go-sdk v1.0.126
 	gorm.io/gorm v1.25.7
 )
